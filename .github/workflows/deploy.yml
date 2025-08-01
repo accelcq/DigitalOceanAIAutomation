@@ -41,6 +41,12 @@ jobs:
           echo "y" | doctl registry repository delete dev-cr fastapi-docker 2>/dev/null || echo "Failed to delete fastapi-docker"
         fi
         
+        # One-time cleanup: Delete old fastapi-app repository if it exists
+        if doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -q "^fastapi-app$"; then
+          echo "Found old fastapi-app repository, deleting (one-time cleanup)..."
+          echo "y" | doctl registry repository delete dev-cr fastapi-app 2>/dev/null || echo "Failed to delete fastapi-app"
+        fi
+        
         # For digitaloceanaiautomation repository, only clean up old tags, keep the repository
         if doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -q "^digitaloceanaiautomation$"; then
           echo "Repository 'digitaloceanaiautomation' exists, cleaning up old tags only..."
@@ -63,7 +69,7 @@ jobs:
         fi
         
         # Clean up any other unknown repositories (safety check)
-        OTHER_REPOS=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -v "^digitaloceanaiautomation$" | grep -v "^fastapi-docker$" || echo "")
+        OTHER_REPOS=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -v "^digitaloceanaiautomation$" | grep -v "^fastapi-docker$" | grep -v "^fastapi-app$" || echo "")
         if [ ! -z "$OTHER_REPOS" ]; then
           echo "Found unexpected repositories, removing: $OTHER_REPOS"
           echo "$OTHER_REPOS" | while read -r repo; do
@@ -83,11 +89,96 @@ jobs:
     
     - name: Push image to DigitalOcean Container Registry
       run: |
-        # Normal push (should work most of the time now)
-        echo "Pushing images to registry..."
-        docker push $REGISTRY/$IMAGE_NAME:$GITHUB_SHA
-        docker push $REGISTRY/$IMAGE_NAME:latest
+        # Validate credentials and authentication before pushing
+        echo "Validating DigitalOcean authentication..."
+        
+        # Check if we're logged into the registry
+        if ! docker info | grep -q "registry.digitalocean.com"; then
+          echo "Warning: Not logged into DigitalOcean registry, attempting re-login..."
+          doctl registry login --expiry-seconds 1200
+        fi
+        
+        # Verify doctl authentication
+        echo "Checking doctl authentication..."
+        if ! doctl auth list | grep -q "default"; then
+          echo "Error: doctl authentication failed"
+          exit 1
+        fi
+        
+        # Test registry access by listing repositories
+        echo "Testing registry access..."
+        if ! doctl registry repository list-v2 dev-cr >/dev/null 2>&1; then
+          echo "Error: Cannot access DigitalOcean Container Registry"
+          echo "Please check DIGITALOCEAN_ACCESS_TOKEN secret"
+          exit 1
+        fi
+        
+        # Verify we have the built images locally
+        echo "Checking local images..."
+        if ! docker images | grep -q "$REGISTRY/$IMAGE_NAME"; then
+          echo "Error: Built images not found locally"
+          exit 1
+        fi
+        
+        # Now attempt the push with better error handling
+        echo "Authentication validated. Pushing images to registry..."
+        
+        echo "Pushing SHA-tagged image..."
+        if ! docker push $REGISTRY/$IMAGE_NAME:$GITHUB_SHA; then
+          echo "Failed to push SHA-tagged image"
+          echo "Registry status:"
+          doctl registry repository list-v2 dev-cr
+          exit 1
+        fi
+        
+        echo "Pushing latest image..."
+        if ! docker push $REGISTRY/$IMAGE_NAME:latest; then
+          echo "Failed to push latest image"
+          echo "Registry status:"
+          doctl registry repository list-v2 dev-cr
+          exit 1
+        fi
+        
         echo "Push completed successfully!"
+        echo "Final registry status:"
+        doctl registry repository list-v2 dev-cr
+    
+    - name: Validate SSH Key before deployment
+      run: |
+        echo "Validating SSH key configuration..."
+        
+        # Check if SSH key secret is set and not empty
+        if [ -z "${{ secrets.DROPLET_SSH_KEY }}" ]; then
+          echo "Error: DROPLET_SSH_KEY secret is empty or not set"
+          echo "Please check GitHub repository secrets"
+          exit 1
+        fi
+        
+        # Check if SSH key starts with proper format
+        SSH_KEY_START=$(echo "${{ secrets.DROPLET_SSH_KEY }}" | head -1)
+        if [[ ! "$SSH_KEY_START" =~ ^-----BEGIN.*(PRIVATE KEY|RSA PRIVATE KEY|OPENSSH PRIVATE KEY)-----$ ]]; then
+          echo "Error: SSH key does not appear to be in correct format"
+          echo "Expected format: -----BEGIN [TYPE] PRIVATE KEY-----"
+          echo "Found: $SSH_KEY_START"
+          exit 1
+        fi
+        
+        # Check if DROPLET_HOST is set
+        if [ -z "${{ secrets.DROPLET_HOST }}" ]; then
+          echo "Error: DROPLET_HOST secret is empty or not set"
+          exit 1
+        fi
+        
+        # Check if DROPLET_USERNAME is set
+        if [ -z "${{ secrets.DROPLET_USERNAME }}" ]; then
+          echo "Error: DROPLET_USERNAME secret is empty or not set"
+          exit 1
+        fi
+        
+        echo "SSH key validation passed!"
+        echo "Host: ${{ secrets.DROPLET_HOST }}"
+        echo "Username: ${{ secrets.DROPLET_USERNAME }}"
+        echo "SSH Key format: Valid"
     
     - name: Deploy to DigitalOcean Droplet
       uses: appleboy/ssh-action@v1.0.3
@@ -100,13 +191,46 @@ jobs:
           doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
           doctl registry login --expiry-seconds 1200
           
-          # Stop and remove existing container
+          # Check current running containers before cleanup
+          echo "Current running containers before cleanup:"
+          docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" || echo "No containers running"
+          
+          # Stop and remove existing containers (both old and new names)
+          echo "Cleaning up existing containers..."
           docker stop digitaloceanaiautomation || true
           docker rm digitaloceanaiautomation || true
+          docker stop fastapi-app || true
+          docker rm fastapi-app || true
+          docker stop fastapi-docker || true
+          docker rm fastapi-docker || true
+          
+          # Check containers after cleanup
+          echo "Containers after cleanup:"
+          docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" || echo "No containers running"
           
           # Pull and run new image
+          echo "Pulling latest image..."
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          
+          echo "Starting new container..."
           docker run -d --name digitaloceanaiautomation -p 80:8000 --restart unless-stopped ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           
+          # Verify container is running and show detailed status
+          echo "Final container status:"
+          docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+          
+          # Show specific container details if running
+          if docker ps | grep -q digitaloceanaiautomation; then
+            echo "✓ digitaloceanaiautomation container is running successfully"
+            echo "Container details:"
+            docker inspect digitaloceanaiautomation --format "{{.State.Status}} - {{.NetworkSettings.Ports}}"
+          else
+            echo "✗ digitaloceanaiautomation container is NOT running"
+            echo "Container logs:"
+            docker logs digitaloceanaiautomation || echo "No logs available"
+            exit 1
+          fi
+          
           # Clean up old images
+          echo "Cleaning up old images..."
           docker image prune -f

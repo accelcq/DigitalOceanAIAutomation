@@ -138,18 +138,35 @@ ssh-keygen -t rsa -b 4096 -C "your-email@example.com"
 
 # Alternative: Generate ed25519 key without passphrase
 ssh-keygen -t ed25519 -C "your-email@example.com"
+
+# Windows users: If you get "No such file or directory" error, use full path:
+# For Windows Command Prompt:
+ssh-keygen -t rsa -b 4096 -C "github-actions" -f "C:\Users\%USERNAME%\.ssh\github_actions_key"
+
+# For Windows PowerShell:
+ssh-keygen -t rsa -b 4096 -C "github-actions" -f "C:\Users\$env:USERNAME\.ssh\github_actions_key"
+
+# Or navigate to .ssh directory first:
+cd C:\Users\%USERNAME%\.ssh
+ssh-keygen -t rsa -b 4096 -C "github-actions" -f github_actions_key
 ```
 
 **Important for GitHub Actions**: Use SSH keys **without passphrases** for automated deployments, as GitHub Actions cannot interactively enter passphrases.
 
 #### Key Identification
-- **Private Key**: `~/.ssh/id_rsa` (keep this secret!)
-- **Public Key**: `~/.ssh/id_rsa.pub` (safe to share)
+- **Private Key**: `~/.ssh/id_rsa` or `C:\Users\USERNAME\.ssh\id_rsa` (Windows) (keep this secret!)
+- **Public Key**: `~/.ssh/id_rsa.pub` or `C:\Users\USERNAME\.ssh\id_rsa.pub` (Windows) (safe to share)
 
 #### Add Public Key to DigitalOcean Droplet
 ```bash
-# Copy public key content
+# Linux/Mac - Copy public key content
 cat ~/.ssh/id_rsa.pub
+
+# Windows Command Prompt - Copy public key content
+type "C:\Users\%USERNAME%\.ssh\github_actions_key.pub"
+
+# Windows PowerShell - Copy public key content
+Get-Content "C:\Users\$env:USERNAME\.ssh\github_actions_key.pub"
 
 # SSH into your droplet and add the public key
 ssh root@YOUR_DROPLET_IP
@@ -184,15 +201,26 @@ Add these secrets to your GitHub repository (Settings → Secrets and variables 
 - **Value**: Contents of your **private key** file **without passphrase**
 - **How to get**:
   ```bash
-  # If using existing key WITHOUT passphrase
+  # Linux/Mac - If using existing key WITHOUT passphrase
   cat ~/.ssh/id_rsa
   
-  # If your current key has a passphrase, create new one without passphrase
-  ssh-keygen -t rsa -b 4096 -C "github-actions@example.com" -f ~/.ssh/github_actions_key
-  # Press Enter twice when prompted for passphrase (leave empty)
+  # Windows Command Prompt - Display private key
+  type "C:\Users\%USERNAME%\.ssh\github_actions_key"
   
-  # Then display the new private key
-  cat ~/.ssh/github_actions_key
+  # Windows PowerShell - Display private key
+  Get-Content "C:\Users\$env:USERNAME\.ssh\github_actions_key"
+  
+  # If your current key has a passphrase, create new one without passphrase
+  # Linux/Mac:
+  ssh-keygen -t rsa -b 4096 -C "github-actions@example.com" -f ~/.ssh/github_actions_key
+  
+  # Windows Command Prompt:
+  ssh-keygen -t rsa -b 4096 -C "github-actions@example.com" -f "C:\Users\%USERNAME%\.ssh\github_actions_key"
+  
+  # Windows PowerShell:
+  ssh-keygen -t rsa -b 4096 -C "github-actions@example.com" -f "C:\Users\$env:USERNAME\.ssh\github_actions_key"
+  
+  # Press Enter twice when prompted for passphrase (leave empty)
   ```
 - **Important**: Copy the entire content including:
   ```
@@ -201,7 +229,7 @@ Add these secrets to your GitHub repository (Settings → Secrets and variables 
   -----END OPENSSH PRIVATE KEY-----
   ```
 
-**Note**: If you create a new key for GitHub Actions, remember to add the corresponding public key (`~/.ssh/github_actions_key.pub`) to your droplet's `~/.ssh/authorized_keys` file.
+**Note**: If you create a new key for GitHub Actions, remember to add the corresponding public key to your droplet's `~/.ssh/authorized_keys` file.
 
 ### 4. Adding Secrets to GitHub Repository
 
@@ -259,16 +287,36 @@ If you encounter SSH passphrase prompts during deployment:
 
 **Option 1: Create new SSH key without passphrase (Recommended)**
 ```bash
-# Create dedicated key for GitHub Actions
+# Linux/Mac - Create dedicated key for GitHub Actions
 ssh-keygen -t rsa -b 4096 -C "github-actions" -f ~/.ssh/github_actions_key
+
+# Windows Command Prompt - Create dedicated key for GitHub Actions
+ssh-keygen -t rsa -b 4096 -C "github-actions" -f "C:\Users\%USERNAME%\.ssh\github_actions_key"
+
+# Windows PowerShell - Create dedicated key for GitHub Actions
+ssh-keygen -t rsa -b 4096 -C "github-actions" -f "C:\Users\$env:USERNAME\.ssh\github_actions_key"
+
 # Press Enter twice for empty passphrase
 
-# Add public key to droplet
+# Linux/Mac - Add public key to droplet
 cat ~/.ssh/github_actions_key.pub
+
+# Windows Command Prompt - Add public key to droplet
+type "C:\Users\%USERNAME%\.ssh\github_actions_key.pub"
+
+# Windows PowerShell - Add public key to droplet
+Get-Content "C:\Users\$env:USERNAME\.ssh\github_actions_key.pub"
+
 # Copy this and add to droplet's ~/.ssh/authorized_keys
 
-# Use private key content in GitHub secret
+# Linux/Mac - Use private key content in GitHub secret
 cat ~/.ssh/github_actions_key
+
+# Windows Command Prompt - Use private key content in GitHub secret
+type "C:\Users\%USERNAME%\.ssh\github_actions_key"
+
+# Windows PowerShell - Use private key content in GitHub secret
+Get-Content "C:\Users\$env:USERNAME\.ssh\github_actions_key"
 ```
 
 **Option 2: Remove passphrase from existing key**

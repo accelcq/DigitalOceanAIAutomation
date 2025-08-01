@@ -32,27 +32,50 @@ jobs:
         echo "Cleaning up existing repositories to avoid limit issues..."
         
         # List all repositories in the registry
-        EXISTING_REPOS=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null || echo "")
+        echo "Listing existing repositories..."
+        doctl registry repository list-v2 dev-cr || echo "No repositories found or error listing"
         
-        if [ ! -z "$EXISTING_REPOS" ]; then
-          echo "Found existing repositories: $EXISTING_REPOS"
+        # Get repository count
+        REPO_COUNT=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | wc -l)
+        echo "Found $REPO_COUNT repositories"
+        
+        if [ "$REPO_COUNT" -ge 1 ]; then
+          echo "Repository limit reached, cleaning up..."
           
-          # Check if our target repository already exists
-          if echo "$EXISTING_REPOS" | grep -q "^digitaloceanaiautomation$"; then
-            echo "Target repository 'digitaloceanaiautomation' already exists, cleaning it up..."
-            # Delete all tags/manifests in the existing repository
-            doctl registry repository delete-manifest dev-cr digitaloceanaiautomation --force || true
-            echo "Cleaned up existing digitaloceanaiautomation repository"
+          # Check if our target repository exists
+          if doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -q "^digitaloceanaiautomation$"; then
+            echo "Target repository 'digitaloceanaiautomation' exists, cleaning up old tags..."
+            
+            # List and delete all tags in the repository
+            echo "Listing tags in digitaloceanaiautomation repository..."
+            doctl registry repository list-tags dev-cr digitaloceanaiautomation || echo "No tags found"
+            
+            # Delete all existing tags to free up space
+            TAGS=$(doctl registry repository list-tags dev-cr digitaloceanaiautomation --format Tag --no-header 2>/dev/null || echo "")
+            if [ ! -z "$TAGS" ]; then
+              echo "Deleting existing tags: $TAGS"
+              for tag in $TAGS; do
+                echo "Deleting tag: $tag"
+                doctl registry repository delete-tag dev-cr digitaloceanaiautomation $tag --force || echo "Failed to delete tag $tag"
+              done
+            fi
           else
-            # If other repositories exist and we're at the limit, delete them
-            echo "Cleaning up other repositories to make space..."
+            # If other repositories exist, delete them completely
+            EXISTING_REPOS=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null || echo "")
             for repo in $EXISTING_REPOS; do
               echo "Deleting repository: $repo"
-              doctl registry repository delete dev-cr $repo --force || true
+              doctl registry repository delete dev-cr $repo --force || echo "Failed to delete repository $repo"
             done
           fi
+          
+          # Run garbage collection to free up space
+          echo "Running garbage collection..."
+          doctl registry garbage-collection start dev-cr || echo "Garbage collection failed or not needed"
+          
+          # Wait a moment for cleanup to complete
+          sleep 10
         else
-          echo "No existing repositories found, proceeding with build..."
+          echo "No repositories found, proceeding with build..."
         fi
     
     - name: Build Docker image

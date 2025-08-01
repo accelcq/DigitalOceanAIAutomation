@@ -239,9 +239,32 @@ docker run -d --name digitaloceanaiautomation -p 80:8000 --restart unless-stoppe
 - **Registry Repository Limit**: Basic plan allows only 1 repository
 
 #### Container Registry Repository Limit Fix:
-**Note**: The deployment workflow now automatically handles repository cleanup, but if you need to manually resolve "registry contains 1 repositories, limit is 1" error:
+**Note**: DigitalOcean free tier has a limit of 1 repository. The deployment workflow automatically handles this by:
+1. **Reusing the same repository** - Deletes old tags/images instead of creating new repositories
+2. **Running garbage collection** - Frees up storage space after cleanup
+3. **Waiting for cleanup completion** - Ensures cleanup finishes before pushing new images
 
-**Option 1: Delete existing repositories (Manual)**
+If you still encounter "registry contains 1 repositories, limit is 1" error, try these manual solutions:
+
+**Option 1: Delete existing tags (Recommended for Free Tier)**
+```bash
+# List existing repositories
+doctl registry repository list-v2 dev-cr
+
+# List tags in your repository
+doctl registry repository list-tags dev-cr digitaloceanaiautomation
+
+# Delete specific tags
+doctl registry repository delete-tag dev-cr digitaloceanaiautomation TAG_NAME --force
+
+# Or delete all tags in the repository (keeps repository, removes content)
+doctl registry repository list-tags dev-cr digitaloceanaiautomation --format Tag --no-header | xargs -I {} doctl registry repository delete-tag dev-cr digitaloceanaiautomation {} --force
+
+# Run garbage collection to free space
+doctl registry garbage-collection start dev-cr
+```
+
+**Option 2: Delete entire repository (Manual)**
 ```bash
 # List existing repositories
 doctl registry repository list-v2 dev-cr

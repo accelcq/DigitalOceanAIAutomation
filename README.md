@@ -13,8 +13,8 @@ AI Automation for source code generation to deploy on DigitalOcean Droplets/VPS-
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/accelcq/digitaloceanaiautomation.git
-cd digitaloceanaiautomation
+git clone https://github.com/accelcq/DigitalOceanAIAutomation.git
+cd DigitalOceanAIAutomation
 ```
 
 2. Install dependencies:
@@ -54,7 +54,7 @@ Once the application is running, visit:
 git init
 
 # Add GitHub remote using accelcq account
-git remote add origin https://github.com/accelcq/digitaloceanaiautomation.git
+git remote add origin https://github.com/accelcq/DigitalOceanAIAutomation.git
 
 # Configure git user (if not already configured)
 git config user.name "accelcq"

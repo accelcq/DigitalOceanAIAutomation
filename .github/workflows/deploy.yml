@@ -1,0 +1,76 @@
+name: Build and Deploy to DigitalOcean
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: registry.digitalocean.com/dev-cr
+  IMAGE_NAME: digitaloceanaiautomation
+  DROPLET_NAME: ubuntu-s-1vcpu-1gb-nyc1-01
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install doctl
+      uses: digitalocean/action-doctl@v2
+      with:
+        token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+    
+    - name: Log in to DigitalOcean Container Registry
+      run: doctl registry login --expiry-seconds 1200
+    
+    - name: Build Docker image
+      run: |
+        docker build -t $REGISTRY/$IMAGE_NAME:$GITHUB_SHA .
+        docker build -t $REGISTRY/$IMAGE_NAME:latest .
+    
+    - name: Push image to DigitalOcean Container Registry
+      run: |
+        docker push $REGISTRY/$IMAGE_NAME:$GITHUB_SHA
+        docker push $REGISTRY/$IMAGE_NAME:latest
+    
+    - name: Deploy to DigitalOcean Droplet
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.DROPLET_HOST }}
+        username: ${{ secrets.DROPLET_USERNAME }}
+        key: ${{ secrets.DROPLET_SSH_KEY }}
+        script: |
+          # Install Docker if not already installed
+          if ! command -v docker &> /dev/null; then
+            curl -fsSL https://get.docker.com -o get-docker.sh
+            sudo sh get-docker.sh
+            sudo usermod -aG docker $USER
+            newgrp docker
+          fi
+          
+          # Install doctl if not already installed
+          if ! command -v doctl &> /dev/null; then
+            cd ~
+            wget https://github.com/digitalocean/doctl/releases/download/v1.104.0/doctl-1.104.0-linux-amd64.tar.gz
+            tar xf doctl-1.104.0-linux-amd64.tar.gz
+            sudo mv doctl /usr/local/bin
+          fi
+          
+          # Configure doctl and login to registry
+          doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          doctl registry login --expiry-seconds 1200
+          
+          # Stop and remove existing container
+          docker stop digitaloceanaiautomation || true
+          docker rm digitaloceanaiautomation || true
+          
+          # Pull and run new image
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker run -d --name digitaloceanaiautomation -p 80:8000 --restart unless-stopped ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          
+          # Clean up old images
+          docker image prune -f

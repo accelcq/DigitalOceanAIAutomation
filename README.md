@@ -106,3 +106,138 @@ git push origin main
 ## License
 
 This project is licensed under the MIT License.
+
+## Required Information for Deployment
+
+### GitHub Workflow Setup
+
+This project includes automated deployment to DigitalOcean using GitHub Actions. Follow these steps to set up deployment:
+
+### 1. DigitalOcean Prerequisites
+
+#### Container Registry Setup
+1. Go to DigitalOcean Control Panel → Container Registry
+2. Create a registry named `dev-cr` if it doesn't exist
+3. Note the registry URL: `registry.digitalocean.com/dev-cr`
+
+#### Droplet Setup
+1. Ensure your droplet `ubuntu-s-1vcpu-1gb-nyc1-01` is running Ubuntu
+2. Make sure the droplet has a public IP address
+3. Ensure SSH access is enabled
+
+### 2. SSH Key Generation and Setup
+
+#### Generate SSH Key Pair
+```bash
+# Generate SSH key pair (run this on your local machine)
+ssh-keygen -t rsa -b 4096 -c "your-email@example.com"
+
+# When prompted, save to default location: ~/.ssh/id_rsa
+# Set a passphrase or leave empty for no passphrase
+```
+
+#### Key Identification
+- **Private Key**: `~/.ssh/id_rsa` (keep this secret!)
+- **Public Key**: `~/.ssh/id_rsa.pub` (safe to share)
+
+#### Add Public Key to DigitalOcean Droplet
+```bash
+# Copy public key content
+cat ~/.ssh/id_rsa.pub
+
+# SSH into your droplet and add the public key
+ssh root@YOUR_DROPLET_IP
+mkdir -p ~/.ssh
+echo "PASTE_PUBLIC_KEY_CONTENT_HERE" >> ~/.ssh/authorized_keys
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
+exit
+```
+
+### 3. Required GitHub Secrets
+
+Add these secrets to your GitHub repository (Settings → Secrets and variables → Actions):
+
+#### DIGITALOCEAN_ACCESS_TOKEN
+- **Value**: Your DigitalOcean API token
+- **How to get**: 
+  1. Go to DigitalOcean Control Panel → API
+  2. Click "Generate New Token"
+  3. Name it (e.g., "GitHub Actions")
+  4. Select "Read" and "Write" scopes
+  5. Copy the generated token
+
+#### DROPLET_HOST
+- **Value**: Your droplet's public IP address
+- **How to get**: DigitalOcean Control Panel → Droplets → Copy IP address
+
+#### DROPLET_USERNAME
+- **Value**: `root` (or your custom user if you created one)
+
+#### DROPLET_SSH_KEY
+- **Value**: Contents of your **private key** file
+- **How to get**:
+  ```bash
+  # Display private key content (copy this entire output)
+  cat ~/.ssh/id_rsa
+  ```
+- **Important**: Copy the entire content including:
+  ```
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  [key content]
+  -----END OPENSSH PRIVATE KEY-----
+  ```
+
+### 4. Adding Secrets to GitHub Repository
+
+1. Navigate to your GitHub repository
+2. Go to Settings → Secrets and variables → Actions
+3. Click "New repository secret"
+4. Add each secret:
+   - Name: `DIGITALOCEAN_ACCESS_TOKEN`, Value: [your DO token]
+   - Name: `DROPLET_HOST`, Value: [your droplet IP]
+   - Name: `DROPLET_USERNAME`, Value: `root`
+   - Name: `DROPLET_SSH_KEY`, Value: [your private key content]
+
+### 5. Workflow Behavior
+
+The GitHub Action will automatically:
+- **Trigger**: On every push to `main` branch
+- **Build**: Docker image using the Dockerfile
+- **Push**: Image to DigitalOcean Container Registry `dev-cr`
+- **Deploy**: Pull and run the container on your droplet
+- **Access**: Application will be available at `http://YOUR_DROPLET_IP`
+
+### 6. Manual Deployment Commands
+
+If you need to deploy manually:
+
+```bash
+# Build and push to registry
+docker build -t registry.digitalocean.com/dev-cr/digitaloceanaiautomation:latest .
+doctl registry login
+docker push registry.digitalocean.com/dev-cr/digitaloceanaiautomation:latest
+
+# Deploy on droplet
+ssh root@YOUR_DROPLET_IP
+docker pull registry.digitalocean.com/dev-cr/digitaloceanaiautomation:latest
+docker stop digitaloceanaiautomation || true
+docker rm digitaloceanaiautomation || true
+docker run -d --name digitaloceanaiautomation -p 80:8000 --restart unless-stopped registry.digitalocean.com/dev-cr/digitaloceanaiautomation:latest
+```
+
+### 7. Troubleshooting
+
+#### Common Issues:
+- **SSH Connection Failed**: Verify droplet IP, username, and private key
+- **Registry Login Failed**: Check DigitalOcean access token permissions
+- **Container Not Starting**: Check application logs with `docker logs digitaloceanaiautomation`
+- **Port 80 Access Issues**: Ensure droplet firewall allows HTTP traffic
+
+#### Checking Deployment Status:
+```bash
+# SSH into droplet and check container status
+ssh root@YOUR_DROPLET_IP
+docker ps
+docker logs digitaloceanaiautomation
+```

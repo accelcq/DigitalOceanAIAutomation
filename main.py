@@ -3,6 +3,42 @@ from fastapi.responses import JSONResponse
 
 app = FastAPI()
 
+@app.get("/")
+async def root():
+    return {
+        "message": "Hello Sir, You are reading the text from the FastAPI application deployed on DigitalOcean Droplet with Ubuntu!",
+        "deployment": "Deployed using GitHub Actions and Docker automatically on each push to the main branch.",
+        "available_endpoints": {
+            "GET /": "Root endpoint - shows this API overview",
+            "GET /health": "Health check endpoint - returns application status",
+            "GET /version": "Version endpoint - returns application version",
+            "GET /info": "Info endpoint - returns application information",
+            "GET /docs": "Documentation endpoint - Swagger UI documentation",
+            "GET /redoc": "Alternative documentation - ReDoc UI",
+            "GET /request-info": "Request info endpoint - returns client request details in headers"
+        },
+        "documentation": {
+            "swagger_ui": "/docs",
+            "redoc": "/redoc",
+            "openapi_json": "/openapi.json"
+        }
+    }
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+@app.get("/version")
+async def version():
+    return {"version": "1.0.0"}
+@app.get("/info")
+async def info():
+    return {"info": "This is a FastAPI application running on DigitalOcean Droplet."}
+
+@app.get("/docs")
+async def get_docs():
+    return {"message": "This endpoint provides documentation for the API."}
+
 @app.get("/request-info")
 async def get_request_info(request: Request):
     # Extract request information

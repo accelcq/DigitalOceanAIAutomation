@@ -129,12 +129,18 @@ This project includes automated deployment to DigitalOcean using GitHub Actions.
 
 #### Generate SSH Key Pair
 ```bash
-# Generate SSH key pair (run this on your local machine)
-ssh-keygen -t rsa -b 4096 -c "your-email@example.com"
+# Generate SSH key pair WITHOUT passphrase (recommended for GitHub Actions)
+ssh-keygen -t rsa -b 4096 -C "your-email@example.com"
 
-# When prompted, save to default location: ~/.ssh/id_rsa
-# Set a passphrase or leave empty for no passphrase
+# When prompted for passphrase, press Enter twice (leave empty)
+# Enter passphrase (empty for no passphrase): [PRESS ENTER]
+# Enter same passphrase again: [PRESS ENTER]
+
+# Alternative: Generate ed25519 key without passphrase
+ssh-keygen -t ed25519 -C "your-email@example.com"
 ```
+
+**Important for GitHub Actions**: Use SSH keys **without passphrases** for automated deployments, as GitHub Actions cannot interactively enter passphrases.
 
 #### Key Identification
 - **Private Key**: `~/.ssh/id_rsa` (keep this secret!)
@@ -175,11 +181,18 @@ Add these secrets to your GitHub repository (Settings → Secrets and variables 
 - **Value**: `root` (or your custom user if you created one)
 
 #### DROPLET_SSH_KEY
-- **Value**: Contents of your **private key** file
+- **Value**: Contents of your **private key** file **without passphrase**
 - **How to get**:
   ```bash
-  # Display private key content (copy this entire output)
+  # If using existing key WITHOUT passphrase
   cat ~/.ssh/id_rsa
+  
+  # If your current key has a passphrase, create new one without passphrase
+  ssh-keygen -t rsa -b 4096 -C "github-actions@example.com" -f ~/.ssh/github_actions_key
+  # Press Enter twice when prompted for passphrase (leave empty)
+  
+  # Then display the new private key
+  cat ~/.ssh/github_actions_key
   ```
 - **Important**: Copy the entire content including:
   ```
@@ -187,6 +200,8 @@ Add these secrets to your GitHub repository (Settings → Secrets and variables 
   [key content]
   -----END OPENSSH PRIVATE KEY-----
   ```
+
+**Note**: If you create a new key for GitHub Actions, remember to add the corresponding public key (`~/.ssh/github_actions_key.pub`) to your droplet's `~/.ssh/authorized_keys` file.
 
 ### 4. Adding Secrets to GitHub Repository
 
@@ -233,10 +248,38 @@ docker run -d --name digitaloceanaiautomation -p 80:8000 --restart unless-stoppe
 
 #### Common Issues:
 - **SSH Connection Failed**: Verify droplet IP, username, and private key
+- **SSH Passphrase Required**: Use SSH keys without passphrases for GitHub Actions
 - **Registry Login Failed**: Check DigitalOcean access token permissions
 - **Container Not Starting**: Check application logs with `docker logs digitaloceanaiautomation`
 - **Port 80 Access Issues**: Ensure droplet firewall allows HTTP traffic
 - **Registry Repository Limit**: Basic plan allows only 1 repository
+
+#### SSH Key Issues:
+If you encounter SSH passphrase prompts during deployment:
+
+**Option 1: Create new SSH key without passphrase (Recommended)**
+```bash
+# Create dedicated key for GitHub Actions
+ssh-keygen -t rsa -b 4096 -C "github-actions" -f ~/.ssh/github_actions_key
+# Press Enter twice for empty passphrase
+
+# Add public key to droplet
+cat ~/.ssh/github_actions_key.pub
+# Copy this and add to droplet's ~/.ssh/authorized_keys
+
+# Use private key content in GitHub secret
+cat ~/.ssh/github_actions_key
+```
+
+**Option 2: Remove passphrase from existing key**
+```bash
+# Remove passphrase from existing key
+ssh-keygen -p -f ~/.ssh/id_rsa
+# Enter old passphrase, then press Enter twice for new empty passphrase
+```
+
+**Option 3: Use SSH agent (Advanced)**
+- Set up SSH agent forwarding (more complex setup)
 
 #### Container Registry Repository Limit Fix:
 **Note**: DigitalOcean free tier has a limit of 1 repository. The deployment workflow automatically handles this by:

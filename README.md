@@ -203,10 +203,13 @@ Add these secrets to your GitHub repository (Settings → Secrets and variables 
 
 The GitHub Action will automatically:
 - **Trigger**: On every push to `main` branch
+- **Cleanup**: Automatically clean up existing repositories to avoid DigitalOcean registry limits
 - **Build**: Docker image using the Dockerfile
 - **Push**: Image to DigitalOcean Container Registry `dev-cr`
 - **Deploy**: Pull and run the container on your droplet
 - **Access**: Application will be available at `http://YOUR_DROPLET_IP`
+
+**Note**: The workflow includes a "Clean up existing repository before build" step that automatically resolves repository limit issues by cleaning up old repositories or manifests before pushing new images.
 
 ### 6. Manual Deployment Commands
 
@@ -233,6 +236,31 @@ docker run -d --name digitaloceanaiautomation -p 80:8000 --restart unless-stoppe
 - **Registry Login Failed**: Check DigitalOcean access token permissions
 - **Container Not Starting**: Check application logs with `docker logs digitaloceanaiautomation`
 - **Port 80 Access Issues**: Ensure droplet firewall allows HTTP traffic
+- **Registry Repository Limit**: Basic plan allows only 1 repository
+
+#### Container Registry Repository Limit Fix:
+**Note**: The deployment workflow now automatically handles repository cleanup, but if you need to manually resolve "registry contains 1 repositories, limit is 1" error:
+
+**Option 1: Delete existing repositories (Manual)**
+```bash
+# List existing repositories
+doctl registry repository list-v2 dev-cr
+
+# Delete unwanted repository
+doctl registry repository delete dev-cr REPOSITORY_NAME --force
+
+# Or delete all manifests in a repository
+doctl registry repository delete-manifest dev-cr REPOSITORY_NAME --force
+```
+
+**Option 2: Upgrade registry plan**
+- Go to DigitalOcean Control Panel → Container Registry
+- Click "Settings" → "Upgrade Plan"
+- Choose a plan with more repository limits
+
+**Option 3: Use different registry name**
+- Create a new registry with a different name
+- Update the workflow `REGISTRY` environment variable
 
 #### Checking Deployment Status:
 ```bash

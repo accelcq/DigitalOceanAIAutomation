@@ -27,6 +27,34 @@ jobs:
     - name: Log in to DigitalOcean Container Registry
       run: doctl registry login --expiry-seconds 1200
     
+    - name: Clean up existing repository before build
+      run: |
+        echo "Cleaning up existing repositories to avoid limit issues..."
+        
+        # List all repositories in the registry
+        EXISTING_REPOS=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null || echo "")
+        
+        if [ ! -z "$EXISTING_REPOS" ]; then
+          echo "Found existing repositories: $EXISTING_REPOS"
+          
+          # Check if our target repository already exists
+          if echo "$EXISTING_REPOS" | grep -q "^digitaloceanaiautomation$"; then
+            echo "Target repository 'digitaloceanaiautomation' already exists, cleaning it up..."
+            # Delete all tags/manifests in the existing repository
+            doctl registry repository delete-manifest dev-cr digitaloceanaiautomation --force || true
+            echo "Cleaned up existing digitaloceanaiautomation repository"
+          else
+            # If other repositories exist and we're at the limit, delete them
+            echo "Cleaning up other repositories to make space..."
+            for repo in $EXISTING_REPOS; do
+              echo "Deleting repository: $repo"
+              doctl registry repository delete dev-cr $repo --force || true
+            done
+          fi
+        else
+          echo "No existing repositories found, proceeding with build..."
+        fi
+    
     - name: Build Docker image
       run: |
         docker build -t $REGISTRY/$IMAGE_NAME:$GITHUB_SHA .

@@ -35,52 +35,50 @@ jobs:
         echo "Current repositories in dev-cr registry:"
         doctl registry repository list-v2 dev-cr || echo "No repositories found"
         
-        # One-time cleanup: Delete old fastapi-docker repository if it exists
-        if doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -q "^fastapi-docker$"; then
-          echo "Found old fastapi-docker repository, deleting (one-time cleanup)..."
-          echo "y" | doctl registry repository delete dev-cr fastapi-docker 2>/dev/null || echo "Failed to delete fastapi-docker"
-        fi
+        # Get all existing repositories
+        ALL_REPOS=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null || echo "")
         
-        # One-time cleanup: Delete old fastapi-app repository if it exists
-        if doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -q "^fastapi-app$"; then
-          echo "Found old fastapi-app repository, deleting (one-time cleanup)..."
-          echo "y" | doctl registry repository delete dev-cr fastapi-app 2>/dev/null || echo "Failed to delete fastapi-app"
-        fi
-        
-        # For digitaloceanaiautomation repository, only clean up old tags, keep the repository
-        if doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -q "^digitaloceanaiautomation$"; then
-          echo "Repository 'digitaloceanaiautomation' exists, cleaning up old tags only..."
+        if [ ! -z "$ALL_REPOS" ]; then
+          echo "Found existing repositories: $ALL_REPOS"
           
-          # Delete only old tags (keep latest and current SHA if they exist)
-          EXISTING_TAGS=$(doctl registry repository list-tags dev-cr digitaloceanaiautomation --format Tag --no-header 2>/dev/null || echo "")
-          if [ ! -z "$EXISTING_TAGS" ]; then
-            echo "Found existing tags: $EXISTING_TAGS"
-            echo "$EXISTING_TAGS" | while read -r tag; do
-              if [ ! -z "$tag" ] && [ "$tag" != "latest" ] && [ "$tag" != "$GITHUB_SHA" ]; then
-                echo "Deleting old tag: $tag"
-                doctl registry repository delete-tag dev-cr digitaloceanaiautomation "$tag" --force 2>/dev/null || echo "Failed to delete tag $tag"
-              else
-                echo "Keeping tag: $tag (latest or current build)"
-              fi
-            done
-          fi
-        else
-          echo "Repository 'digitaloceanaiautomation' doesn't exist yet, will be created on first push"
-        fi
-        
-        # Clean up any other unknown repositories (safety check)
-        OTHER_REPOS=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -v "^digitaloceanaiautomation$" | grep -v "^fastapi-docker$" | grep -v "^fastapi-app$" || echo "")
-        if [ ! -z "$OTHER_REPOS" ]; then
-          echo "Found unexpected repositories, removing: $OTHER_REPOS"
-          echo "$OTHER_REPOS" | while read -r repo; do
+          # Delete ALL repositories except digitaloceanaiautomation if it exists
+          echo "$ALL_REPOS" | while read -r repo; do
             if [ ! -z "$repo" ]; then
-              echo "Deleting unexpected repository: $repo"
-              echo "y" | doctl registry repository delete dev-cr "$repo" 2>/dev/null || echo "Failed to delete $repo"
+              if [ "$repo" = "digitaloceanaiautomation" ]; then
+                echo "Found target repository 'digitaloceanaiautomation', cleaning up old tags only..."
+                # Delete only old tags for our target repository
+                EXISTING_TAGS=$(doctl registry repository list-tags dev-cr digitaloceanaiautomation --format Tag --no-header 2>/dev/null || echo "")
+                if [ ! -z "$EXISTING_TAGS" ]; then
+                  echo "Found existing tags: $EXISTING_TAGS"
+                  echo "$EXISTING_TAGS" | while read -r tag; do
+                    if [ ! -z "$tag" ] && [ "$tag" != "latest" ] && [ "$tag" != "$GITHUB_SHA" ]; then
+                      echo "Deleting old tag: $tag"
+                      doctl registry repository delete-tag dev-cr digitaloceanaiautomation "$tag" --force 2>/dev/null || echo "Failed to delete tag $tag"
+                    else
+                      echo "Keeping tag: $tag (latest or current build)"
+                    fi
+                  done
+                fi
+              else
+                echo "Deleting repository: $repo (cleanup for repository limit)"
+                printf "y\n" | doctl registry repository delete dev-cr "$repo" 2>/dev/null || echo "Failed to delete $repo"
+              fi
             fi
           done
+        else
+          echo "No existing repositories found"
         fi
         
-        echo "Cleanup completed. Ready for build..."
+        # Force garbage collection to ensure cleanup
+        echo "Starting garbage collection to free up space..."
+        doctl registry garbage-collection start dev-cr --include-untagged-manifests 2>/dev/null || echo "GC start failed"
+        
+        # Wait for garbage collection to complete
+        echo "Waiting for garbage collection to complete..."
+        sleep 30
+        
+        echo "Final cleanup state:"
+        doctl registry repository list-v2 dev-cr || echo "No repositories found"
     
     - name: Build Docker image
       run: |

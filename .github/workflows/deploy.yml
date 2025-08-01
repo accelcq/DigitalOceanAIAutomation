@@ -41,19 +41,19 @@ jobs:
         if [ ! -z "$ALL_REPOS" ]; then
           echo "Found existing repositories: $ALL_REPOS"
           
-          # Delete ALL repositories except digitaloceanaiautomation if it exists
+          # Delete ALL repositories except digitaloceanaiaautomation if it exists
           echo "$ALL_REPOS" | while read -r repo; do
             if [ ! -z "$repo" ]; then
               if [ "$repo" = "digitaloceanaiaautomation" ]; then
-                echo "Found target repository 'digitaloceanaiautomation', cleaning up old tags only..."
+                echo "Found target repository 'digitaloceanaiaautomation', cleaning up old tags only..."
                 # Delete only old tags for our target repository
-                EXISTING_TAGS=$(doctl registry repository list-tags dev-cr digitaloceanaiautomation --format Tag --no-header 2>/dev/null || echo "")
+                EXISTING_TAGS=$(doctl registry repository list-tags dev-cr digitaloceanaiaautomation --format Tag --no-header 2>/dev/null || echo "")
                 if [ ! -z "$EXISTING_TAGS" ]; then
                   echo "Found existing tags: $EXISTING_TAGS"
                   echo "$EXISTING_TAGS" | while read -r tag; do
                     if [ ! -z "$tag" ] && [ "$tag" != "latest" ] && [ "$tag" != "$GITHUB_SHA" ]; then
                       echo "Deleting old tag: $tag"
-                      doctl registry repository delete-tag dev-cr digitaloceanaiautomation "$tag" 2>/dev/null || echo "Failed to delete tag $tag"
+                      doctl registry repository delete-tag dev-cr digitaloceanaiaautomation "$tag" 2>/dev/null || echo "Failed to delete tag $tag"
                     else
                       echo "Keeping tag: $tag (latest or current build)"
                     fi
@@ -90,14 +90,26 @@ jobs:
           echo "No existing repositories found"
         fi
         
-        # Force garbage collection to ensure cleanup
+        # Start garbage collection and wait for completion (polling up to 60 minutes)
         echo "Starting garbage collection to free up space..."
-        doctl registry garbage-collection start dev-cr --include-untagged-manifests 2>/dev/null || echo "GC start failed - continuing anyway"
+        GC_UUID=$(doctl registry garbage-collection start dev-cr --include-untagged-manifests --output json | jq -r '.[0].uuid')
+        if [ -z "$GC_UUID" ]; then
+          echo "Failed to start garbage collection. Manual cleanup may be required."
+          exit 1
+        fi
+        echo "Garbage collection started with UUID: $GC_UUID"
+        echo "Waiting for garbage collection to complete (up to 60 minutes)..."
+        for i in {1..60}; do
+          GC_STATUS=$(doctl registry garbage-collection get dev-cr "$GC_UUID" --format Status --no-header 2>/dev/null)
+          if [[ "$GC_STATUS" == "completed" ]]; then
+            echo "Garbage collection completed!"
+            break
+          fi
+          echo "GC status: $GC_STATUS (minute $i/60)"
+          sleep 60
+        done
         
-        # Wait for garbage collection to complete
-        echo "Waiting for cleanup to complete..."
-        sleep 30
-        
+        # Final cleanup state
         echo "Final cleanup state:"
         doctl registry repository list-v2 dev-cr || echo "No repositories found"
         

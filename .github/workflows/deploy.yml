@@ -29,63 +29,69 @@ jobs:
     
     - name: Clean up existing repository before build
       run: |
-        echo "Cleaning up existing repositories to avoid limit issues..."
+        echo "Cleaning up old repositories and preparing for new build..."
         
-        # List all repositories in the registry
-        echo "Listing existing repositories..."
-        doctl registry repository list-v2 dev-cr || echo "No repositories found or error listing"
+        # Delete the old fastapi-docker repository if it exists
+        echo "Checking for and removing old fastapi-docker repository..."
+        doctl registry repository delete dev-cr fastapi-docker --force 2>/dev/null || echo "fastapi-docker repository not found or already deleted"
         
-        # Get repository count
-        REPO_COUNT=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | wc -l)
-        echo "Found $REPO_COUNT repositories"
+        # Clean up digitaloceanaiautomation repository
+        echo "Cleaning up digitaloceanaiautomation repository..."
         
-        if [ "$REPO_COUNT" -ge 1 ]; then
-          echo "Repository limit reached, cleaning up..."
-          
-          # Check if our target repository exists
-          if doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -q "^digitaloceanaiautomation$"; then
-            echo "Target repository 'digitaloceanaiautomation' exists, cleaning up old tags..."
-            
-            # List and delete all tags in the repository
-            echo "Listing tags in digitaloceanaiautomation repository..."
-            doctl registry repository list-tags dev-cr digitaloceanaiautomation || echo "No tags found"
-            
-            # Delete all existing tags to free up space
-            TAGS=$(doctl registry repository list-tags dev-cr digitaloceanaiautomation --format Tag --no-header 2>/dev/null || echo "")
-            if [ ! -z "$TAGS" ]; then
-              echo "Deleting existing tags: $TAGS"
-              for tag in $TAGS; do
-                echo "Deleting tag: $tag"
-                doctl registry repository delete-tag dev-cr digitaloceanaiautomation $tag --force || echo "Failed to delete tag $tag"
-              done
+        # Try to delete common tag names that might exist
+        doctl registry repository delete-tag dev-cr digitaloceanaiautomation latest --force 2>/dev/null || echo "latest tag not found"
+        doctl registry repository delete-tag dev-cr digitaloceanaiautomation $GITHUB_SHA --force 2>/dev/null || echo "$GITHUB_SHA tag not found"
+        
+        # Get all existing tags and delete them
+        EXISTING_TAGS=$(doctl registry repository list-tags dev-cr digitaloceanaiautomation --format Tag --no-header 2>/dev/null || echo "")
+        if [ ! -z "$EXISTING_TAGS" ]; then
+          echo "Found existing tags, deleting: $EXISTING_TAGS"
+          echo "$EXISTING_TAGS" | while read -r tag; do
+            if [ ! -z "$tag" ]; then
+              echo "Deleting tag: $tag"
+              doctl registry repository delete-tag dev-cr digitaloceanaiautomation "$tag" --force || echo "Failed to delete $tag"
             fi
-          else
-            # If other repositories exist, delete them completely
-            EXISTING_REPOS=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null || echo "")
-            for repo in $EXISTING_REPOS; do
-              echo "Deleting repository: $repo"
-              doctl registry repository delete dev-cr $repo --force || echo "Failed to delete repository $repo"
-            done
-          fi
-          
-          # Run garbage collection to free up space
-          echo "Running garbage collection..."
-          doctl registry garbage-collection start dev-cr || echo "Garbage collection failed or not needed"
-          
-          # Wait a moment for cleanup to complete
-          sleep 10
-        else
-          echo "No repositories found, proceeding with build..."
+          done
         fi
+        
+        # Force garbage collection
+        echo "Starting garbage collection..."
+        doctl registry garbage-collection start dev-cr --include-untagged-manifests || echo "GC start failed"
+        
+        # Wait for cleanup to complete
+        sleep 15
+        
+        echo "Cleanup completed. Current repositories:"
+        doctl registry repository list-v2 dev-cr || echo "No repositories found"
     
     - name: Build Docker image
       run: |
         docker build -t $REGISTRY/$IMAGE_NAME:$GITHUB_SHA .
         docker build -t $REGISTRY/$IMAGE_NAME:latest .
     
-    - name: Push image to DigitalOcean Container Registry
+    - name: Push image to DigitalOcean Container Registry (with retry)
       run: |
-        docker push $REGISTRY/$IMAGE_NAME:$GITHUB_SHA
+        # First attempt to push
+        if ! docker push $REGISTRY/$IMAGE_NAME:$GITHUB_SHA; then
+          echo "First push failed, attempting aggressive cleanup..."
+          
+          # Emergency cleanup - delete the entire repository and recreate
+          echo "Deleting entire repository to clear space..."
+          doctl registry repository delete dev-cr digitaloceanaiautomation --force || echo "Repository delete failed"
+          
+          # Wait for deletion to complete
+          sleep 20
+          
+          # Force garbage collection
+          doctl registry garbage-collection start dev-cr --include-untagged-manifests || echo "GC failed"
+          sleep 30
+          
+          # Retry push - this will create the repository fresh
+          echo "Retrying push after cleanup..."
+          docker push $REGISTRY/$IMAGE_NAME:$GITHUB_SHA
+        fi
+        
+        # Push latest tag
         docker push $REGISTRY/$IMAGE_NAME:latest
     
     - name: Deploy to DigitalOcean Droplet
@@ -95,23 +101,7 @@ jobs:
         username: ${{ secrets.DROPLET_USERNAME }}
         key: ${{ secrets.DROPLET_SSH_KEY }}
         script: |
-          # Install Docker if not already installed
-          if ! command -v docker &> /dev/null; then
-            curl -fsSL https://get.docker.com -o get-docker.sh
-            sudo sh get-docker.sh
-            sudo usermod -aG docker $USER
-            newgrp docker
-          fi
-          
-          # Install doctl if not already installed
-          if ! command -v doctl &> /dev/null; then
-            cd ~
-            wget https://github.com/digitalocean/doctl/releases/download/v1.104.0/doctl-1.104.0-linux-amd64.tar.gz
-            tar xf doctl-1.104.0-linux-amd64.tar.gz
-            sudo mv doctl /usr/local/bin
-          fi
-          
-          # Configure doctl and login to registry
+          # Configure doctl and login to registry (doctl and docker should already be installed)
           doctl auth init --access-token ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
           doctl registry login --expiry-seconds 1200
           

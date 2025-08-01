@@ -61,7 +61,21 @@ jobs:
                 fi
               else
                 echo "Deleting repository: $repo (cleanup for repository limit)"
-                printf "y\n" | doctl registry repository delete dev-cr "$repo" 2>/dev/null || echo "Failed to delete $repo"
+                # Use the correct doctl command syntax to delete repository
+                doctl registry repository delete dev-cr "$repo" --force || echo "Failed to delete $repo - trying alternative method"
+                
+                # Alternative: Delete all tags first, then repository will be auto-removed
+                echo "Alternative cleanup: Deleting all tags from $repo..."
+                REPO_TAGS=$(doctl registry repository list-tags dev-cr "$repo" --format Tag --no-header 2>/dev/null || echo "")
+                if [ ! -z "$REPO_TAGS" ]; then
+                  echo "Deleting tags from $repo: $REPO_TAGS"
+                  echo "$REPO_TAGS" | while read -r tag; do
+                    if [ ! -z "$tag" ]; then
+                      echo "Deleting tag $tag from $repo"
+                      doctl registry repository delete-tag dev-cr "$repo" "$tag" --force 2>/dev/null || echo "Failed to delete tag $tag"
+                    fi
+                  done
+                fi
               fi
             fi
           done
@@ -71,14 +85,83 @@ jobs:
         
         # Force garbage collection to ensure cleanup
         echo "Starting garbage collection to free up space..."
-        doctl registry garbage-collection start dev-cr --include-untagged-manifests 2>/dev/null || echo "GC start failed"
+        doctl registry garbage-collection start dev-cr --include-untagged-manifests 2>/dev/null || echo "GC start failed - continuing anyway"
         
         # Wait for garbage collection to complete
-        echo "Waiting for garbage collection to complete..."
+        echo "Waiting for cleanup to complete..."
         sleep 30
         
         echo "Final cleanup state:"
         doctl registry repository list-v2 dev-cr || echo "No repositories found"
+        
+        # If repository still exists, try one more aggressive deletion
+        REMAINING_REPOS=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -v "^digitaloceanaiautomation$" || echo "")
+        if [ ! -z "$REMAINING_REPOS" ]; then
+          echo "Still found repositories after cleanup: $REMAINING_REPOS"
+          echo "Attempting final cleanup..."
+          echo "$REMAINING_REPOS" | while read -r repo; do
+            if [ ! -z "$repo" ]; then
+              echo "Final attempt to delete: $repo"
+              doctl registry repository delete dev-cr "$repo" --force || echo "Final deletion failed for $repo"
+            fi
+          done
+          
+          # Wait a bit more and check again
+          sleep 15
+        fi
+        
+        # Final validation - ensure cleanup was successful
+        echo "Validating cleanup success..."
+        FINAL_CHECK=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | grep -v "^digitaloceanaiautomation$" || echo "")
+        if [ ! -z "$FINAL_CHECK" ]; then
+          echo "❌ ERROR: Repository cleanup FAILED!"
+          echo "Still found repositories: $FINAL_CHECK"
+          echo "Cannot proceed with deployment due to repository limit"
+          echo ""
+          echo "Manual cleanup required:"
+          echo "1. Go to DigitalOcean Control Panel → Container Registry"
+          echo "2. Delete repositories manually: $FINAL_CHECK"
+          echo "3. Or run: doctl registry repository delete dev-cr REPOSITORY_NAME --force"
+          echo ""
+          exit 1
+        else
+          echo "✅ Repository cleanup successful! Ready to proceed with build."
+          REMAINING_COUNT=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | wc -l)
+          echo "Current repository count: $REMAINING_COUNT (limit: 1)"
+        fi
+    
+    - name: Pre-build validation
+      run: |
+        echo "Pre-build validation: Checking repository limits..."
+        
+        # Count current repositories
+        REPO_COUNT=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | wc -l)
+        echo "Current repository count: $REPO_COUNT"
+        
+        # Check if we're at or under the limit
+        if [ "$REPO_COUNT" -gt 1 ]; then
+          echo "❌ ERROR: Too many repositories ($REPO_COUNT) - exceeds free tier limit of 1"
+          echo "Cleanup failed. Current repositories:"
+          doctl registry repository list-v2 dev-cr
+          echo ""
+          echo "Please manually delete unwanted repositories before proceeding:"
+          doctl registry repository list-v2 dev-cr --format Name --no-header | grep -v "^digitaloceanaiautomation$"
+          exit 1
+        elif [ "$REPO_COUNT" -eq 1 ]; then
+          # Check if the one repository is our target repository
+          EXISTING_REPO=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null)
+          if [ "$EXISTING_REPO" != "digitaloceanaiautomation" ]; then
+            echo "❌ ERROR: Wrong repository exists: $EXISTING_REPO"
+            echo "Expected 'digitaloceanaiautomation' or no repositories"
+            exit 1
+          else
+            echo "✅ Target repository 'digitaloceanaiautomation' exists - proceeding with tag update"
+          fi
+        else
+          echo "✅ No repositories found - will create 'digitaloceanaiautomation' on first push"
+        fi
+        
+        echo "Pre-build validation passed!"
     
     - name: Build Docker image
       run: |

@@ -48,6 +48,24 @@ Once the application is running, visit:
 
 ## Version Control & GitHub Deployment
 
+### Authentication Setup
+If you encounter permission issues, ensure you're authenticated with the correct GitHub account:
+
+```bash
+# Clear cached credentials
+git config --global --unset credential.helper
+git config --global credential.helper manager-core
+
+# Update git config for accelcq account
+git config --global user.name "AccelCQ"
+git config --global user.email "accelcq-email@example.com"
+```
+
+**VS Code GitHub Authentication:**
+1. Press `Ctrl+Shift+P`
+2. Type "GitHub: Sign out" and execute
+3. Type "GitHub: Sign in" and authenticate with AccelCQ account
+
 ### Initial Setup
 ```bash
 # Initialize git repository

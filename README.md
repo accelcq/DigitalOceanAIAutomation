@@ -107,6 +107,306 @@ git push origin main
 
 This project is licensed under the MIT License.
 
+## Development Workflow - Dev Branch Setup and Management
+
+### **For Developers: Working with Dev Branch**
+
+This project supports automatic deployment to both **production** and **development** environments:
+- **Production (main branch)**: `http://YOUR_DROPLET_IP:80`
+- **Development (dev branch)**: `http://YOUR_DROPLET_IP:8080`
+
+### **Step 1: Switch to Dev Branch in VS Code**
+
+#### **Option A: Using VS Code Git Integration (Recommended)**
+1. **Stay in VS Code** - No need to close the editor
+2. **Open Command Palette**: Press `Ctrl+Shift+P`
+3. **Type**: `Git: Create Branch` (or `Git: Checkout to` if branch exists)
+4. **Enter branch name**: `dev`
+5. **Press Enter** - VS Code automatically switches to the `dev` branch
+
+#### **Option B: Using Terminal in VS Code**
+```bash
+# Open Terminal in VS Code: Ctrl+` (backtick)
+
+# Create and switch to dev branch (first time)
+git checkout -b dev
+
+# Or switch to existing dev branch
+git checkout dev
+
+# Verify you're on dev branch
+git branch
+# Should show: * dev (asterisk indicates current branch)
+```
+
+#### **Option C: Using External Terminal**
+```bash
+# Navigate to project directory
+cd "d:\AccelCQ\project\TestProject\DigitalOceanAIAutomation"
+
+# Create and switch to dev branch
+git checkout -b dev
+
+# Verify current branch
+git branch
+```
+
+### **Step 2: Verify Branch Setup**
+
+**In VS Code, check the bottom-left corner** - it should show `dev` instead of `main`
+
+### **Step 3: Daily Development Workflow**
+
+#### **Working on Features**
+```bash
+# Ensure you're on dev branch
+git checkout dev
+
+# Pull latest changes
+git pull origin dev
+
+# Make your changes
+# ... edit files in VS Code ...
+
+# Stage changes
+git add .
+
+# Commit with descriptive message
+git commit -m "feat: Add new feature description"
+
+# Push to dev branch (triggers dev deployment)
+git push origin dev
+```
+
+#### **Monitor Dev Deployment**
+1. **Go to GitHub Actions**: https://github.com/accelcq/DigitalOceanAIAutomation/actions
+2. **Watch the deployment workflow run** for the `dev` branch
+3. **Access dev environment**: `http://YOUR_DROPLET_IP:8080`
+
+### **Step 4: Promoting Changes to Production**
+
+#### **Option A: Automatic Merge (No Conflicts)**
+```bash
+# Switch to main branch
+git checkout main
+
+# Pull latest main
+git pull origin main
+
+# Merge dev into main
+git merge dev
+
+# If no conflicts, push to trigger production deployment
+git push origin main
+```
+
+#### **Option B: Manual Merge (With Conflicts)**
+```bash
+# Switch to main branch
+git checkout main
+
+# Pull latest main
+git pull origin main
+
+# Attempt merge
+git merge dev
+
+# If conflicts occur, Git will show:
+# CONFLICT (content): Merge conflict in filename.py
+# Automatic merge failed; fix conflicts and then commit the result.
+```
+
+### **Step 5: Conflict Resolution Process**
+
+#### **When Merge Conflicts Occur:**
+
+1. **Identify Conflicted Files**:
+   ```bash
+   git status
+   # Shows files with conflicts
+   ```
+
+2. **Manual Resolution**:
+   - Open conflicted files in VS Code
+   - Look for conflict markers:
+     ```
+     <<<<<<< HEAD
+     code from main branch
+     =======
+     code from dev branch
+     >>>>>>> dev
+     ```
+   - **Choose the correct code** or **combine both**
+   - **Remove conflict markers** (`<<<<<<<`, `=======`, `>>>>>>>`)
+
+3. **Complete the Merge**:
+   ```bash
+   # After resolving all conflicts
+   git add .
+   git commit -m "resolve: Merge dev into main - resolved conflicts in [filename]"
+   git push origin main
+   ```
+
+4. **Email Notification Process**:
+   ```bash
+   # If conflicts are complex, send email notification:
+   # Subject: "Merge Conflict Resolution Required - DigitalOceanAIAutomation"
+   # Recipients: 
+   #   - Development Team Lead: dev-lead@accelcq.com
+   #   - Project Manager: pm@accelcq.com
+   # 
+   # Email Content:
+   # "Merge conflicts detected in files: [list files]
+   #  Manual intervention required for production deployment.
+   #  Conflicts resolved in commit: [commit hash]
+   #  Production deployment triggered at: [timestamp]"
+   ```
+
+### **Step 6: Revert Process (If Needed)**
+
+#### **Revert to Previous Production State**:
+```bash
+# If production deployment fails after merge
+git checkout main
+
+# Find the last working commit
+git log --oneline -5
+
+# Revert to previous working commit
+git revert HEAD --no-edit
+
+# Push the revert
+git push origin main
+
+# Email notification about revert
+# Subject: "Production Revert - DigitalOceanAIAutomation"
+```
+
+### **Step 7: Environment Verification**
+
+#### **Check Deployment Status**:
+```bash
+# SSH into droplet
+ssh root@YOUR_DROPLET_IP
+
+# Check both containers are running
+docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+
+# Expected output:
+# digitaloceanaiautomation-prod  (port 80)  ← Production
+# digitaloceanaiautomation-dev   (port 8080) ← Development
+```
+
+#### **Access Applications**:
+- **Production**: `http://YOUR_DROPLET_IP:80`
+- **Development**: `http://YOUR_DROPLET_IP:8080`
+- **API Documentation**: 
+  - Prod: `http://YOUR_DROPLET_IP:80/docs`
+  - Dev: `http://YOUR_DROPLET_IP:8080/docs`
+
+### **Docker Image Impact:**
+
+#### **Registry Structure**:
+```
+Registry: registry.digitalocean.com/dev-cr/digitaloceanaiautomation
+Tags:
+├── latest (from main branch - production)
+├── dev (from dev branch - development)
+└── COMMIT_SHA tags (from both branches)
+
+Droplet Containers:
+├── digitaloceanaiautomation-prod (port 80) ← Main branch
+└── digitaloceanaiautomation-dev (port 8080) ← Dev branch
+```
+
+### **Best Practices**
+
+#### **For Developers**:
+1. **Always work on dev branch** for new features
+2. **Test in dev environment** before promoting to main
+3. **Keep commits small and focused**
+4. **Write descriptive commit messages**
+5. **Pull latest dev before starting work**
+
+#### **For Deployment**:
+1. **Dev deployments are automatic** on push to `dev`
+2. **Production deployments are automatic** on push to `main`
+3. **Both environments run simultaneously** on same droplet
+4. **No downtime** during deployments (containers restart independently)
+
+#### **Conflict Prevention**:
+1. **Frequent small merges** to main
+2. **Regular communication** between developers
+3. **Feature branch naming**: `feature/description` or `fix/description`
+4. **Pull latest main** before merging dev
+
+### **Emergency Procedures**
+
+#### **If Production is Down**:
+1. **Check GitHub Actions** for deployment status
+2. **SSH into droplet** and check container logs:
+   ```bash
+   docker logs digitaloceanaiautomation-prod
+   ```
+3. **Quick rollback**:
+   ```bash
+   git checkout main
+   git revert HEAD --no-edit
+   git push origin main
+   ```
+4. **Notify team immediately**
+
+#### **If Dev Environment is Down**:
+1. **Check GitHub Actions** for dev deployment status
+2. **Restart dev container manually**:
+   ```bash
+   ssh root@YOUR_DROPLET_IP
+   docker restart digitaloceanaiautomation-dev
+   ```
+
+### **Email Notification Templates**
+
+#### **Conflict Resolution Email**:
+```
+Subject: Merge Conflict Resolution - DigitalOceanAIAutomation
+
+Dear Team,
+
+Merge conflicts were detected and resolved during deployment:
+
+Files affected: [list files]
+Conflicts resolved in commit: [commit hash]
+Resolution time: [timestamp]
+Production deployment status: [Success/Failed]
+
+Production URL: http://YOUR_DROPLET_IP:80
+Development URL: http://YOUR_DROPLET_IP:8080
+
+Best regards,
+[Developer Name]
+```
+
+#### **Emergency Revert Email**:
+```
+Subject: URGENT: Production Revert - DigitalOceanAIAutomation
+
+Dear Team,
+
+Production deployment has been reverted due to critical issues:
+
+Reverted commit: [commit hash]
+Revert time: [timestamp]
+Current production status: [Status]
+Issue description: [Brief description]
+
+Immediate action required: [Next steps]
+
+Production URL: http://YOUR_DROPLET_IP:80
+
+Best regards,
+[Developer Name]
+```
+
 ## Required Information for Deployment
 
 ### GitHub Workflow Setup

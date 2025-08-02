@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -5,8 +6,12 @@ app = FastAPI()
 
 @app.get("/")
 async def root():
+    # Detect environment based on container name or default to dev for dev branch
+    environment = "development"
     return {
-        "message": "Hello Sir, You are reading the text from the FastAPI application deployed on DigitalOcean Droplet with Ubuntu!",
+        "message": f"Hello from DigitalOcean AI Automation - {environment.upper()} Environment!",
+        "environment": environment,
+        "version": "1.0-dev",
         "deployment": "Deployed using GitHub Actions and Docker automatically on each push to the main branch.",
         "available_endpoints": {
             "GET /": "Root endpoint - shows this API overview",
@@ -26,7 +31,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    return {"status": "healthy", "environment": "development"}
 
 @app.get("/version")
 async def version():
@@ -66,3 +71,7 @@ async def get_request_info(request: Request):
         content={"message": "Request info added to response headers"},
         headers=response_headers
     )
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int, q: str = None):
+    return {"item_id": item_id, "q": q, "environment": "development"}

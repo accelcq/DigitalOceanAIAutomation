@@ -172,8 +172,8 @@ jobs:
           
           # Stop and remove existing containers (both old and new names)
           echo "Cleaning up existing containers..."
-          docker stop digitaloceanaiaautomation || true
-          docker rm digitaloceanaiaautomation || true
+          docker stop digitaloceanaiautomation || true
+          docker rm digitaloceanaiautomation || true
           docker stop fastapi-app || true
           docker rm fastapi-app || true
           docker stop fastapi-docker || true
@@ -188,21 +188,21 @@ jobs:
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           
           echo "Starting new container..."
-          docker run -d --name digitaloceanaiaautomation -p 80:8000 --restart unless-stopped ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker run -d --name digitaloceanaiautomation -p 80:8000 --restart unless-stopped ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           
           # Verify container is running and show detailed status
           echo "Final container status:"
           docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
           
           # Show specific container details if running
-          if docker ps | grep -q digitaloceanaiaautomation; then
-            echo "✓ digitaloceanaiaautomation container is running successfully"
+          if docker ps | grep -q digitaloceanaiautomation; then
+            echo "✓ digitaloceanaiautomation container is running successfully"
             echo "Container details:"
-            docker inspect digitaloceanaiaautomation --format "{{.State.Status}} - {{.NetworkSettings.Ports}}"
+            docker inspect digitaloceanaiautomation --format "{{.State.Status}} - {{.NetworkSettings.Ports}}"
           else
-            echo "✗ digitaloceanaiaautomation container is NOT running"
+            echo "✗ digitaloceanaiautomation container is NOT running"
             echo "Container logs:"
-            docker logs digitaloceanaiaautomation || echo "No logs available"
+            docker logs digitaloceanaiautomation || echo "No logs available"
             exit 1
           fi
           

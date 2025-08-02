@@ -35,7 +35,7 @@ jobs:
         echo "Current repositories in dev-cr registry:"
         doctl registry repository list-v2 dev-cr || echo "No repositories found"
         
-        # Proceed only if digitaloceanaiaautomation is the only repository or none exist
+        # Proceed only if digitaloceanaiautomation is the only repository or none exist
         REPO_COUNT=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null | wc -l)
         if [ "$REPO_COUNT" -gt 1 ]; then
           echo "❌ ERROR: Too many repositories ($REPO_COUNT) - exceeds free tier limit of 1"
@@ -44,15 +44,15 @@ jobs:
           exit 1
         elif [ "$REPO_COUNT" -eq 1 ]; then
           EXISTING_REPO=$(doctl registry repository list-v2 dev-cr --format Name --no-header 2>/dev/null)
-          if [ "$EXISTING_REPO" != "digitaloceanaiaautomation" ]; then
+          if [ "$EXISTING_REPO" != "digitaloceanaiautomation" ]; then
             echo "❌ ERROR: Wrong repository exists: $EXISTING_REPO"
-            echo "Expected 'digitaloceanaiaautomation' or no repositories"
+            echo "Expected 'digitaloceanaiautomation' or no repositories"
             exit 1
           else
-            echo "✅ Target repository 'digitaloceanaiaautomation' exists - proceeding with tag update"
+            echo "✅ Target repository 'digitaloceanaiautomation' exists - proceeding with tag update"
           fi
         else
-          echo "✅ No repositories found - will create 'digitaloceanaiaautomation' on first push"
+          echo "✅ No repositories found - will create 'digitaloceanaiautomation' on first push"
         fi
         
         echo "Repository state validated. Ready to build and deploy."

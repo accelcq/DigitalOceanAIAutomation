@@ -2,9 +2,9 @@ name: Build and Deploy to DigitalOcean
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
 
 env:
   REGISTRY: registry.digitalocean.com/dev-cr
@@ -26,6 +26,23 @@ jobs:
     
     - name: Log in to DigitalOcean Container Registry
       run: doctl registry login --expiry-seconds 1200
+    
+    - name: Set environment variables
+      run: |
+        if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          echo "DEPLOY_ENV=prod" >> $GITHUB_ENV
+          echo "CONTAINER_NAME=digitaloceanaiautomation-prod" >> $GITHUB_ENV
+          echo "CONTAINER_PORT=80" >> $GITHUB_ENV
+          echo "IMAGE_TAG=latest" >> $GITHUB_ENV
+        elif [ "${{ github.ref }}" = "refs/heads/dev" ]; then
+          echo "DEPLOY_ENV=dev" >> $GITHUB_ENV
+          echo "CONTAINER_NAME=digitaloceanaiautomation-dev" >> $GITHUB_ENV
+          echo "CONTAINER_PORT=8080" >> $GITHUB_ENV
+          echo "IMAGE_TAG=dev" >> $GITHUB_ENV
+        fi
+        echo "Deploying to environment: $DEPLOY_ENV"
+        echo "Container name: $CONTAINER_NAME"
+        echo "Container port: $CONTAINER_PORT"
     
     - name: Clean up existing repository before build
       run: |
@@ -60,7 +77,7 @@ jobs:
     - name: Build Docker image
       run: |
         docker build -t $REGISTRY/$IMAGE_NAME:$GITHUB_SHA .
-        docker build -t $REGISTRY/$IMAGE_NAME:latest .
+        docker build -t $REGISTRY/$IMAGE_NAME:${{ env.IMAGE_TAG }} .
     
     - name: Push image to DigitalOcean Container Registry
       run: |
@@ -106,9 +123,9 @@ jobs:
           exit 1
         fi
         
-        echo "Pushing latest image..."
-        if ! docker push $REGISTRY/$IMAGE_NAME:latest; then
-          echo "Failed to push latest image"
+        echo "Pushing environment-specific image..."
+        if ! docker push $REGISTRY/$IMAGE_NAME:${{ env.IMAGE_TAG }}; then
+          echo "Failed to push environment-specific image"
           echo "Registry status:"
           doctl registry repository list-v2 dev-cr
           exit 1
@@ -170,8 +187,12 @@ jobs:
           echo "Current running containers before cleanup:"
           docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" || echo "No containers running"
           
-          # Stop and remove existing containers (both old and new names)
-          echo "Cleaning up existing containers..."
+          # Stop and remove existing containers for this environment only
+          echo "Cleaning up existing containers for ${{ env.DEPLOY_ENV }} environment..."
+          docker stop ${{ env.CONTAINER_NAME }} || true
+          docker rm ${{ env.CONTAINER_NAME }} || true
+          
+          # Legacy cleanup (can be removed after a few deployments)
           docker stop digitaloceanaiautomation || true
           docker rm digitaloceanaiautomation || true
           docker stop fastapi-app || true
@@ -184,25 +205,26 @@ jobs:
           docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" || echo "No containers running"
           
           # Pull and run new image
-          echo "Pulling latest image..."
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          echo "Pulling image for ${{ env.DEPLOY_ENV }} environment..."
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           
-          echo "Starting new container..."
-          docker run -d --name digitaloceanaiautomation -p 80:8000 --restart unless-stopped ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          echo "Starting new container: ${{ env.CONTAINER_NAME }}..."
+          docker run -d --name ${{ env.CONTAINER_NAME }} -p ${{ env.CONTAINER_PORT }}:8000 --restart unless-stopped ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           
           # Verify container is running and show detailed status
           echo "Final container status:"
           docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
           
           # Show specific container details if running
-          if docker ps | grep -q digitaloceanaiautomation; then
-            echo "✓ digitaloceanaiautomation container is running successfully"
+          if docker ps | grep -q ${{ env.CONTAINER_NAME }}; then
+            echo "✓ ${{ env.CONTAINER_NAME }} container is running successfully"
             echo "Container details:"
-            docker inspect digitaloceanaiautomation --format "{{.State.Status}} - {{.NetworkSettings.Ports}}"
+            docker inspect ${{ env.CONTAINER_NAME }} --format "{{.State.Status}} - {{.NetworkSettings.Ports}}"
+            echo "Access URL: http://147.182.214.146:${{ env.CONTAINER_PORT }}"
           else
-            echo "✗ digitaloceanaiautomation container is NOT running"
+            echo "✗ ${{ env.CONTAINER_NAME }} container is NOT running"
             echo "Container logs:"
-            docker logs digitaloceanaiautomation || echo "No logs available"
+            docker logs ${{ env.CONTAINER_NAME }} || echo "No logs available"
             exit 1
           fi
           
